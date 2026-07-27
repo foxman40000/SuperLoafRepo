@@ -48,12 +48,13 @@ let player;
 let platforms;
 let cursors;
 let itemsGroup; 
-let janitorsGroup;
+let dronesGroup;
 let score = 0;
 let scoreText;
 
 let isMovingLeft = false;
 let isMovingRight = false;
+let isStunned = false; // Prevents input when hit by a drone
 
 function preload() {}
 
@@ -76,27 +77,26 @@ function create() {
     player.body.setBounce(0.1);
     player.body.setCollideWorldBounds(true);
 
-    // Dynamic Groups
+    // Groups
     itemsGroup = this.physics.add.group();
-    janitorsGroup = this.physics.add.group();
+    dronesGroup = this.physics.add.group();
 
-    // Spawn 2 Future Robot Janitors (Gray Rectangles)
-    spawnJanitor.call(this, 300, 380, 120); // Janitor 1 on ground
-    spawnJanitor.call(this, 550, 250, -100); // Janitor 2 on high platform
+    // Spawn Hover Drones (Gray rectangles unaffected by gravity)
+    spawnDrone.call(this, 300, 200, 100, 50);
+    spawnDrone.call(this, 500, 100, -80, -60);
 
     // Physics Collisions
     this.physics.add.collider(player, platforms);
     this.physics.add.collider(itemsGroup, platforms);
-    this.physics.add.collider(janitorsGroup, platforms);
     
-    // Core Interactions
+    // Core Overlaps
     this.physics.add.overlap(player, itemsGroup, eatItem, null, this);
     
-    // Robots block Super Loaf Dog (solid physical wall)
-    this.physics.add.collider(player, janitorsGroup);
+    // Drones overlap with garbage to sweep it up
+    this.physics.add.overlap(dronesGroup, itemsGroup, droneClean, null, this);
     
-    // Janitors sweep up the garbage when they roll over it
-    this.physics.add.overlap(janitorsGroup, itemsGroup, janitorClean, null, this);
+    // Drones overlap player to stun him instead of knocking them off screen
+    this.physics.add.overlap(player, dronesGroup, playerHitDrone, null, this);
 
     // UI Score Text
     scoreText = this.add.text(16, 16, 'Score: 0', { 
@@ -105,7 +105,7 @@ function create() {
         fontFamily: 'Courier New' 
     });
 
-    // Time-based Spawner: Slowed down slightly to 2.2 seconds to account for robot cleanup
+    // Endlessly spawn items every 2.2 seconds
     this.time.addEvent({
         delay: 2200,
         callback: spawnItem,
@@ -113,47 +113,52 @@ function create() {
         loop: true
     });
 
-    // Initial item splash
+    // Initial items
     for (let i = 0; i < 3; i++) {
         spawnItem.call(this);
     }
 
-    // Controls Configuration
+    // Controls Layout
     cursors = this.input.keyboard.createCursorKeys();
     
     this.input.on('pointerdown', function (pointer) {
-        if (pointer.y < 350 && player.body.touching.down) {
+        if (!isStunned && pointer.y < 350 && player.body.touching.down) {
             player.body.setVelocityY(-420);
         }
     });
 
-    // On-screen Mobile Controls
+    // Mobile buttons
     let leftBtn = this.add.rectangle(70, 380, 90, 60, 0xff00ff, 0.4).setStrokeStyle(2, 0x00ffff).setInteractive();
     this.add.text(50, 368, 'LEFT', { fontSize: '18px', fill: '#00ffff', fontFamily: 'Courier New' });
 
     let rightBtn = this.add.rectangle(730, 380, 90, 60, 0xff00ff, 0.4).setStrokeStyle(2, 0x00ffff).setInteractive();
     this.add.text(710, 368, 'RIGHT', { fontSize: '18px', fill: '#00ffff', fontFamily: 'Courier New' });
 
-    leftBtn.on('pointerdown', () => { isMovingLeft = true; });
+    leftBtn.on('pointerdown', () => { if(!isStunned) isMovingLeft = true; });
     leftBtn.on('pointerout', () => { isMovingLeft = false; });
     leftBtn.on('pointerup', () => { isMovingLeft = false; });
 
-    rightBtn.on('pointerdown', () => { isMovingRight = true; });
+    rightBtn.on('pointerdown', () => { if(!isStunned) isMovingRight = true; });
     rightBtn.on('pointerout', () => { isMovingRight = false; });
     rightBtn.on('pointerup', () => { isMovingRight = false; });
 }
 
-// Spawn a patrolling Robot Janitor
-function spawnJanitor(x, y, speed) {
-    let janitor = this.add.rectangle(x, y, 40, 50, 0x888888).setStrokeStyle(2, 0xcccccc);
-    this.physics.add.existing(janitor);
-    janitor.body.setCollideWorldBounds(true);
-    janitor.body.setVelocityX(speed);
-    janitor.body.setBounce(1, 0); // Bounce off walls perfectly horizontally
-    janitorsGroup.add(janitor);
+// Spawns a drone that flies completely independently of platforms/gravity
+function spawnDrone(x, y, speedX, speedY) {
+    let drone = this.add.rectangle(x, y, 40, 40, 0x777777).setStrokeStyle(2, 0xaaaaaa);
+    this.physics.add.existing(drone);
+    
+    // Turn off gravity entirely for this object so it hovers
+    drone.body.setAllowGravity(false);
+    drone.body.setCollideWorldBounds(true);
+    
+    // Set active velocities
+    drone.body.setVelocity(speedX, speedY);
+    drone.body.setBounce(1, 1); // Perfect bounce off all screen edges
+    
+    dronesGroup.add(drone);
 }
 
-// Spawns items with custom behaviors based on type
 function spawnItem() {
     let xX = Phaser.Math.Between(50, 750);
     let yY = 0;
@@ -164,10 +169,8 @@ function spawnItem() {
         item = this.add.rectangle(xX, yY, 20, 20, 0x39ff14);
         item.isFood = true;
         
-        // 10-Second Expiration Timer for Green Food Squares
         this.time.delayedCall(10000, () => {
             if (item && item.active) {
-                // Flash rapidly before blinking out of existence
                 this.tweens.add({
                     targets: item,
                     alpha: 0,
@@ -187,7 +190,8 @@ function spawnItem() {
 }
 
 function update() {
-    // Player movement
+    if (isStunned) return; // Freeze control updates if stunned
+
     if (cursors.left.isDown || isMovingLeft) {
         player.body.setVelocityX(-220);
     } else if (cursors.right.isDown || isMovingRight) {
@@ -199,34 +203,23 @@ function update() {
     if (cursors.up.isDown && player.body.touching.down) {
         player.body.setVelocityY(-420);
     }
-
-    // AI Routine: Turn janitors around if they hit platform edges or slow down
-    janitorsGroup.children.iterate((janitor) => {
-        if (janitor.body.blocked.left) {
-            janitor.body.setVelocityX(120);
-        } else if (janitor.body.blocked.right) {
-            janitor.body.setVelocityX(-120);
-        }
-    });
 }
 
-// Player Collision Handler
 function eatItem(player, item) {
     if (item.isFood) {
         score += 10;
         this.cameras.main.flash(100, 0, 255, 0, 0.2);
     } else {
-        score -= 15; // Increased penalty!
+        score -= 15;
         this.cameras.main.shake(150, 0.02);
     }
     item.destroy();
     scoreText.setText('Score: ' + score);
 }
 
-// Janitor Collision Handler: Sweeps up garbage safely, ignores food
-function janitorClean(janitor, item) {
+// Hover drones absorb the trash cleanly
+function droneClean(drone, item) {
     if (!item.isFood) {
-        // Create a quick shrinking effect to simulate the vacuum intake
         this.tweens.add({
             targets: item,
             scaleX: 0,
@@ -235,6 +228,34 @@ function janitorClean(janitor, item) {
             onComplete: () => { item.destroy(); }
         });
     }
+}
+
+// Custom handler: Running into a drone stuns Super Loaf Dog instead of pushing the drone away
+function playerHitDrone(player, drone) {
+    if (isStunned) return; // Prevent overlapping stuns
+
+    isStunned = true;
+    isMovingLeft = false;
+    isMovingRight = false;
+    
+    player.body.setVelocity(0, 0); // Freeze Loaf in place
+    
+    // Quick flashing visual effect to show he is stunned
+    let flashTween = this.tweens.add({
+        targets: player,
+        alpha: 0.3,
+        duration: 100,
+        yoyo: true,
+        repeat: 5
+    });
+
+    this.cameras.main.shake(200, 0.01);
+
+    // Release stun after 600 milliseconds
+    this.time.delayedCall(600, () => {
+        isStunned = false;
+        player.alpha = 1;
+    });
 }
 </script>
 
