@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Super Loaf Dog</title>
-    <!-- Include Phaser 3 from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body {
@@ -16,6 +15,8 @@
             align-items: center;
             height: 100vh;
             overflow: hidden;
+            /* Prevents phone gestures from messing with the game */
+            touch-action: none; 
         }
         canvas {
             box-shadow: 0 0 20px #ff00ff;
@@ -25,7 +26,6 @@
 <body>
 
 <script>
-// Game configuration optimized for a retro mobile layout
 const config = {
     type: Phaser.AUTO,
     width: 800,
@@ -52,41 +52,37 @@ let garbage;
 let score = 0;
 let scoreText;
 
+// Mobile control tracking states
+let isMovingLeft = false;
+let isMovingRight = false;
+
 function preload() {
-    // In a full game, you would load your 16-bit pixel art here:
-    // this.load.image('loaf', 'assets/super_loaf_dog.png');
-    
-    // Using colored placeholders for this demo template
+    // Standard preload zone for future pixel art
 }
 
 function create() {
-    // 1. Futuristic Cyberpunk Grid Background
+    // 1. Cyberpunk Grid Background
     this.cameras.main.setBackgroundColor('#12042b');
     
-    // 2. Create Platforms (Neon Ledges)
+    // 2. Create Platforms
     platforms = this.physics.add.staticGroup();
-    
-    // Floor
     let ground = this.add.rectangle(400, 430, 800, 40, 0x00ffff).setStrokeStyle(4, 0xff00ff);
     platforms.add(ground);
     
-    // Floating neon platforms
     let plat1 = this.add.rectangle(600, 300, 200, 20, 0x00ffff).setStrokeStyle(2, 0xff00ff);
     let plat2 = this.add.rectangle(200, 220, 200, 20, 0x00ffff).setStrokeStyle(2, 0xff00ff);
     platforms.add(plat1);
     platforms.add(plat2);
 
-    // 3. Create Super Loaf Dog (The Hero)
-    // Represented by an orange "loaf" rectangle for now
+    // 3. Create Super Loaf Dog
     player = this.add.rectangle(100, 300, 50, 35, 0xe69138); 
     this.physics.add.existing(player);
     player.body.setBounce(0.1);
     player.body.setCollideWorldBounds(true);
 
-    // 4. Create Cyber-Garbage to collect
+    // 4. Create Cyber-Garbage
     garbage = this.physics.add.group();
     for (let i = 0; i < 5; i++) {
-        // Green glowing garbage scraps
         let scrap = this.add.rectangle(200 + (i * 120), 100, 20, 20, 0x39ff14);
         garbage.add(scrap);
         scrap.body.setBounceY(Phaser.Math.FloatBetween(0.2, 0.4));
@@ -95,8 +91,6 @@ function create() {
     // 5. Physics Collisions
     this.physics.add.collider(player, platforms);
     this.physics.add.collider(garbage, platforms);
-    
-    // Overlap detection: When Loaf eats garbage
     this.physics.add.overlap(player, garbage, eatGarbage, null, this);
 
     // 6. UI Score Text
@@ -106,39 +100,58 @@ function create() {
         fontFamily: 'Courier New' 
     });
 
-    // 7. Controls (Keyboard for testing, touch can be mapped next)
+    // 7. Desktop Keyboard Controls
     cursors = this.input.keyboard.createCursorKeys();
     
-    // Mobile Touch Input: Tapping the screen makes Loaf jump
-    this.input.on('pointerdown', function () {
-        if (player.body.touching.down) {
-            player.body.setVelocityY(-400);
+    // 8. Mobile Controls Interface
+    // Tap the top half of the screen to jump
+    this.input.on('pointerdown', function (pointer) {
+        // If the tap is anywhere above the bottom controls zone, trigger jump
+        if (pointer.y < 350 && player.body.touching.down) {
+            player.body.setVelocityY(-420);
         }
     });
+
+    // Visual Virtual D-Pad Buttons at the bottom corners
+    // Left Button (Bottom Left Corner)
+    let leftBtn = this.add.rectangle(70, 380, 90, 60, 0xff00ff, 0.4).setStrokeStyle(2, 0x00ffff).setInteractive();
+    this.add.text(50, 368, 'LEFT', { fontSize: '18px', fill: '#00ffff', fontFamily: 'Courier New' });
+
+    // Right Button (Bottom Right Corner)
+    let rightBtn = this.add.rectangle(730, 380, 90, 60, 0xff00ff, 0.4).setStrokeStyle(2, 0x00ffff).setInteractive();
+    this.add.text(710, 368, 'RIGHT', { fontSize: '18px', fill: '#00ffff', fontFamily: 'Courier New' });
+
+    // Touch Event Listeners for Left Button
+    leftBtn.on('pointerdown', () => { isMovingLeft = true; });
+    leftBtn.on('pointerout', () => { isMovingLeft = false; });
+    leftBtn.on('pointerup', () => { isMovingLeft = false; });
+
+    // Touch Event Listeners for Right Button
+    rightBtn.on('pointerdown', () => { isMovingRight = true; });
+    rightBtn.on('pointerout', () => { isMovingRight = false; });
+    rightBtn.on('pointerup', () => { isMovingRight = false; });
 }
 
 function update() {
-    // Left/Right Controls
-    if (cursors.left.isDown) {
-        player.body.setVelocityX(-200);
-    } else if (cursors.right.isDown) {
-        player.body.setVelocityX(200);
+    // Check both Keyboard and On-Screen Button inputs
+    if (cursors.left.isDown || isMovingLeft) {
+        player.body.setVelocityX(-220);
+    } else if (cursors.right.isDown || isMovingRight) {
+        player.body.setVelocityX(220);
     } else {
         player.body.setVelocityX(0);
     }
 
-    // Jump Control (Keyboard)
+    // Keyboard Jump
     if (cursors.up.isDown && player.body.touching.down) {
-        player.body.setVelocityY(-400);
+        player.body.setVelocityY(-420);
     }
 }
 
 function eatGarbage(player, scrap) {
-    scrap.destroy(); // Remove the garbage
+    scrap.destroy();
     score += 1;
     scoreText.setText('Garbage Eaten: ' + score);
-    
-    // Snappy screen shake for feedback
     this.cameras.main.shake(100, 0.01);
 }
 </script>
