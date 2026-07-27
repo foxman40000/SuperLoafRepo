@@ -47,7 +47,8 @@ const game = new Phaser.Game(config);
 let player;
 let platforms;
 let cursors;
-let itemsGroup; // Single group to hold both food and garbage
+let itemsGroup; 
+let janitorsGroup;
 let score = 0;
 let scoreText;
 
@@ -75,15 +76,27 @@ function create() {
     player.body.setBounce(0.1);
     player.body.setCollideWorldBounds(true);
 
-    // Create a dynamic group for falling items
+    // Dynamic Groups
     itemsGroup = this.physics.add.group();
+    janitorsGroup = this.physics.add.group();
+
+    // Spawn 2 Future Robot Janitors (Gray Rectangles)
+    spawnJanitor.call(this, 300, 380, 120); // Janitor 1 on ground
+    spawnJanitor.call(this, 550, 250, -100); // Janitor 2 on high platform
 
     // Physics Collisions
     this.physics.add.collider(player, platforms);
     this.physics.add.collider(itemsGroup, platforms);
+    this.physics.add.collider(janitorsGroup, platforms);
     
-    // Core Eating Mechanic: Super Loaf Dog vacuum mode activated
+    // Core Interactions
     this.physics.add.overlap(player, itemsGroup, eatItem, null, this);
+    
+    // Robots block Super Loaf Dog (solid physical wall)
+    this.physics.add.collider(player, janitorsGroup);
+    
+    // Janitors sweep up the garbage when they roll over it
+    this.physics.add.overlap(janitorsGroup, itemsGroup, janitorClean, null, this);
 
     // UI Score Text
     scoreText = this.add.text(16, 16, 'Score: 0', { 
@@ -92,20 +105,20 @@ function create() {
         fontFamily: 'Courier New' 
     });
 
-    // Time-based Spawner: Drops an item every 1.5 seconds endlessly
+    // Time-based Spawner: Slowed down slightly to 2.2 seconds to account for robot cleanup
     this.time.addEvent({
-        delay: 1500,
+        delay: 2200,
         callback: spawnItem,
         callbackScope: this,
         loop: true
     });
 
-    // Spawn an initial batch so the map isn't empty at startup
-    for (let i = 0; i < 4; i++) {
+    // Initial item splash
+    for (let i = 0; i < 3; i++) {
         spawnItem.call(this);
     }
 
-    // Controls Layout
+    // Controls Configuration
     cursors = this.input.keyboard.createCursorKeys();
     
     this.input.on('pointerdown', function (pointer) {
@@ -114,7 +127,7 @@ function create() {
         }
     });
 
-    // On-screen D-Pad
+    // On-screen Mobile Controls
     let leftBtn = this.add.rectangle(70, 380, 90, 60, 0xff00ff, 0.4).setStrokeStyle(2, 0x00ffff).setInteractive();
     this.add.text(50, 368, 'LEFT', { fontSize: '18px', fill: '#00ffff', fontFamily: 'Courier New' });
 
@@ -130,35 +143,51 @@ function create() {
     rightBtn.on('pointerup', () => { isMovingRight = false; });
 }
 
-// Function to generate random food or garbage falling from the sky
+// Spawn a patrolling Robot Janitor
+function spawnJanitor(x, y, speed) {
+    let janitor = this.add.rectangle(x, y, 40, 50, 0x888888).setStrokeStyle(2, 0xcccccc);
+    this.physics.add.existing(janitor);
+    janitor.body.setCollideWorldBounds(true);
+    janitor.body.setVelocityX(speed);
+    janitor.body.setBounce(1, 0); // Bounce off walls perfectly horizontally
+    janitorsGroup.add(janitor);
+}
+
+// Spawns items with custom behaviors based on type
 function spawnItem() {
-    // Generate at a random X position along the top of the screen
     let xX = Phaser.Math.Between(50, 750);
     let yY = 0;
-    
-    // 50/50 chance to be Food or Garbage
     let isFood = Phaser.Math.Between(0, 1) === 1;
     let item;
 
     if (isFood) {
-        // Neon Green Food Square
         item = this.add.rectangle(xX, yY, 20, 20, 0x39ff14);
-        item.isFood = true; // Custom flag to identify it later
+        item.isFood = true;
+        
+        // 10-Second Expiration Timer for Green Food Squares
+        this.time.delayedCall(10000, () => {
+            if (item && item.active) {
+                // Flash rapidly before blinking out of existence
+                this.tweens.add({
+                    targets: item,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: () => { item.destroy(); }
+                });
+            }
+        });
     } else {
-        // Neon Red Garbage Square
         item = this.add.rectangle(xX, yY, 20, 20, 0xff3333);
         item.isFood = false;
     }
 
-    // Add it to our physics engine
     itemsGroup.add(item);
-    
-    // Give it a random bounce so it dances across platforms
-    item.body.setBounceY(Phaser.Math.FloatBetween(0.2, 0.5));
+    item.body.setBounceY(Phaser.Math.FloatBetween(0.2, 0.4));
     item.body.setCollideWorldBounds(true);
 }
 
 function update() {
+    // Player movement
     if (cursors.left.isDown || isMovingLeft) {
         player.body.setVelocityX(-220);
     } else if (cursors.right.isDown || isMovingRight) {
@@ -170,20 +199,42 @@ function update() {
     if (cursors.up.isDown && player.body.touching.down) {
         player.body.setVelocityY(-420);
     }
+
+    // AI Routine: Turn janitors around if they hit platform edges or slow down
+    janitorsGroup.children.iterate((janitor) => {
+        if (janitor.body.blocked.left) {
+            janitor.body.setVelocityX(120);
+        } else if (janitor.body.blocked.right) {
+            janitor.body.setVelocityX(-120);
+        }
+    });
 }
 
-// Collision handler: Super Loaf Dog eats the object regardless, but points shift
+// Player Collision Handler
 function eatItem(player, item) {
     if (item.isFood) {
-        score += 10; // Food gives points!
-        this.cameras.main.flash(100, 0, 255, 0, 0.2); // Soft green screen pulse
+        score += 10;
+        this.cameras.main.flash(100, 0, 255, 0, 0.2);
     } else {
-        score -= 5; // Garbage takes away points!
-        this.cameras.main.shake(150, 0.015); // Violent screen shake for eating trash
+        score -= 15; // Increased penalty!
+        this.cameras.main.shake(150, 0.02);
     }
-
-    item.destroy(); // Erase item from existence
+    item.destroy();
     scoreText.setText('Score: ' + score);
+}
+
+// Janitor Collision Handler: Sweeps up garbage safely, ignores food
+function janitorClean(janitor, item) {
+    if (!item.isFood) {
+        // Create a quick shrinking effect to simulate the vacuum intake
+        this.tweens.add({
+            targets: item,
+            scaleX: 0,
+            scaleY: 0,
+            duration: 100,
+            onComplete: () => { item.destroy(); }
+        });
+    }
 }
 </script>
 
