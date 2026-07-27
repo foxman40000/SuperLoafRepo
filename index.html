@@ -54,7 +54,7 @@ let scoreText;
 
 let isMovingLeft = false;
 let isMovingRight = false;
-let isStunned = false; // Prevents input when hit by a drone
+let isStunned = false; 
 
 function preload() {}
 
@@ -77,13 +77,18 @@ function create() {
     player.body.setBounce(0.1);
     player.body.setCollideWorldBounds(true);
 
-    // Groups
+    // Groups - Dynamic setup with global physics instructions
     itemsGroup = this.physics.add.group();
-    dronesGroup = this.physics.add.group();
+    
+    // Explicitly create drones group with custom physics settings to bypass world gravity rules
+    dronesGroup = this.physics.add.group({
+        allowGravity: false,
+        immovable: true
+    });
 
-    // Spawn Hover Drones (Gray rectangles unaffected by gravity)
-    spawnDrone.call(this, 300, 200, 100, 50);
-    spawnDrone.call(this, 500, 100, -80, -60);
+    // Spawn Hover Drones
+    spawnDrone.call(this, 300, 200, 120, 60);
+    spawnDrone.call(this, 500, 100, -90, -90);
 
     // Physics Collisions
     this.physics.add.collider(player, platforms);
@@ -91,11 +96,7 @@ function create() {
     
     // Core Overlaps
     this.physics.add.overlap(player, itemsGroup, eatItem, null, this);
-    
-    // Drones overlap with garbage to sweep it up
     this.physics.add.overlap(dronesGroup, itemsGroup, droneClean, null, this);
-    
-    // Drones overlap player to stun him instead of knocking them off screen
     this.physics.add.overlap(player, dronesGroup, playerHitDrone, null, this);
 
     // UI Score Text
@@ -113,12 +114,11 @@ function create() {
         loop: true
     });
 
-    // Initial items
     for (let i = 0; i < 3; i++) {
         spawnItem.call(this);
     }
 
-    // Controls Layout
+    // Controls Configuration
     cursors = this.input.keyboard.createCursorKeys();
     
     this.input.on('pointerdown', function (pointer) {
@@ -143,20 +143,17 @@ function create() {
     rightBtn.on('pointerup', () => { isMovingRight = false; });
 }
 
-// Spawns a drone that flies completely independently of platforms/gravity
 function spawnDrone(x, y, speedX, speedY) {
     let drone = this.add.rectangle(x, y, 40, 40, 0x777777).setStrokeStyle(2, 0xaaaaaa);
-    this.physics.add.existing(drone);
     
-    // Turn off gravity entirely for this object so it hovers
+    // Add to group first so it inherits group properties
+    dronesGroup.add(drone);
+    
+    // Re-verify specific properties to anchor it completely in flight mode
     drone.body.setAllowGravity(false);
     drone.body.setCollideWorldBounds(true);
-    
-    // Set active velocities
     drone.body.setVelocity(speedX, speedY);
-    drone.body.setBounce(1, 1); // Perfect bounce off all screen edges
-    
-    dronesGroup.add(drone);
+    drone.body.setBounce(1, 1);
 }
 
 function spawnItem() {
@@ -190,7 +187,7 @@ function spawnItem() {
 }
 
 function update() {
-    if (isStunned) return; // Freeze control updates if stunned
+    if (isStunned) return;
 
     if (cursors.left.isDown || isMovingLeft) {
         player.body.setVelocityX(-220);
@@ -217,7 +214,6 @@ function eatItem(player, item) {
     scoreText.setText('Score: ' + score);
 }
 
-// Hover drones absorb the trash cleanly
 function droneClean(drone, item) {
     if (!item.isFood) {
         this.tweens.add({
@@ -230,17 +226,15 @@ function droneClean(drone, item) {
     }
 }
 
-// Custom handler: Running into a drone stuns Super Loaf Dog instead of pushing the drone away
 function playerHitDrone(player, drone) {
-    if (isStunned) return; // Prevent overlapping stuns
+    if (isStunned) return;
 
     isStunned = true;
     isMovingLeft = false;
     isMovingRight = false;
     
-    player.body.setVelocity(0, 0); // Freeze Loaf in place
+    player.body.setVelocity(0, 0); 
     
-    // Quick flashing visual effect to show he is stunned
     let flashTween = this.tweens.add({
         targets: player,
         alpha: 0.3,
@@ -251,7 +245,6 @@ function playerHitDrone(player, drone) {
 
     this.cameras.main.shake(200, 0.01);
 
-    // Release stun after 600 milliseconds
     this.time.delayedCall(600, () => {
         isStunned = false;
         player.alpha = 1;
